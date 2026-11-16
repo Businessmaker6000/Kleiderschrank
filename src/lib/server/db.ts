@@ -168,8 +168,9 @@ const g = globalThis as unknown as { __wardrobeDb?: Db };
 
 export function db(): Db {
   if (g.__wardrobeDb) return g.__wardrobeDb;
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  // trimmed: a stray space or line break from copy and paste must not break the connection
+  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, '');
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (url && key) {
     g.__wardrobeDb = new SupabaseDb(url, key);
   } else {
