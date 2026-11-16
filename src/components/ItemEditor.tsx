@@ -1,11 +1,13 @@
 "use client";
 
-import { Heart, Sparkles, Trash2 } from "lucide-react";
+import { Eraser, Heart, Sparkles, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { mutate } from "swr";
-import { api } from "@/lib/client/api";
+import { api, upload } from "@/lib/client/api";
+import { prepareImage } from "@/lib/client/image";
 import type { Item } from "@/lib/types";
+import { imageUrl } from "@/lib/types";
 import { ItemImage } from "./Collage";
 import { ItemForm, draftFromItem, draftValid } from "./ItemForm";
 import type { ItemDraft } from "./ItemForm";
@@ -20,6 +22,33 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
   const [error, setError] = useState("");
   const [confirm, setConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [cutting, setCutting] = useState<number | null>(null);
+
+  // older uploads: remove the background now and replace the stored photo
+  async function cutOut() {
+    setCutting(0);
+    setError("");
+    try {
+      const res = await fetch(imageUrl(item)!, { credentials: "same-origin" });
+      if (!res.ok) throw new Error("Das Foto konnte nicht geladen werden.");
+      const prepared = await prepareImage(await res.blob(), { onProgress: setCutting });
+      URL.revokeObjectURL(prepared.previewUrl);
+      if (!prepared.cutout) throw new Error("Der Hintergrund liess sich bei diesem Foto nicht entfernen.");
+      const form = new FormData();
+      form.append("image", prepared.blob, "photo");
+      form.append("width", String(prepared.width));
+      form.append("height", String(prepared.height));
+      form.append("cutout", "1");
+      await upload(`/api/items/${item.id}/image`, form, () => {});
+      await mutate("/api/items");
+      toast("Hintergrund entfernt");
+      onClose();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCutting(null);
+    }
+  }
 
   async function save() {
     setBusy(true);
@@ -83,6 +112,12 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
                 <Heart className={cx("size-4", draft.favorite && "fill-accent text-accent")} aria-hidden />
                 {draft.favorite ? "Lieblingsstück" : "Als Favorit markieren"}
               </Button>
+              {item.image && !item.image.cutout && (
+                <Button variant="outline" size="sm" onClick={cutOut} loading={cutting !== null}>
+                  {cutting === null && <Eraser className="size-4" aria-hidden />}
+                  {cutting === null ? "Hintergrund entfernen" : `Wird entfernt … ${Math.round(cutting * 100)} %`}
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => router.push(`/create?around=${item.id}`)}>
                 <Sparkles className="size-4" aria-hidden /> Outfit damit erstellen
               </Button>

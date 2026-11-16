@@ -12,6 +12,8 @@ export interface ItemImage {
   path: string;
   width: number;
   height: number;
+  /** background removed: a transparent cut-out of the garment */
+  cutout: boolean;
 }
 
 export interface Item {

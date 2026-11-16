@@ -2,17 +2,20 @@
 // Pure data + helpers, used on client and server (and in node tests).
 
 export type Group = 'tops' | 'bottoms' | 'outerwear' | 'shoes' | 'dresses' | 'accessories' | 'other';
-export type Slot = 'top' | 'bottom' | 'dress' | 'outerwear' | 'shoes' | 'accessory' | 'bag';
+export type Slot = 'head' | 'outerwear' | 'layer' | 'top' | 'dress' | 'bottom' | 'shoes' | 'accessory' | 'bag';
 
-export const SLOTS: Slot[] = ['outerwear', 'top', 'dress', 'bottom', 'shoes', 'accessory', 'bag'];
+/** The compartments of an outfit, from head to toe. */
+export const SLOTS: Slot[] = ['head', 'outerwear', 'layer', 'top', 'dress', 'bottom', 'shoes', 'accessory', 'bag'];
 
 export const SLOT_LABEL: Record<Slot, string> = {
-  top: 'Oberteil',
-  bottom: 'Unterteil',
-  dress: 'Kleid / Set',
+  head: 'Kopf',
   outerwear: 'Jacke',
+  layer: 'Pulli',
+  top: 'Shirt',
+  dress: 'Kleid / Set',
+  bottom: 'Hose',
   shoes: 'Schuhe',
-  accessory: 'Accessoire',
+  accessory: 'Schmuck & Uhr',
   bag: 'Tasche',
 };
 
@@ -50,12 +53,15 @@ export const GROUP_IDS = GROUPS.map((g) => g.id);
 export const GROUP_LABEL = Object.fromEntries(GROUPS.map((g) => [g.id, g.label])) as Record<Group, string>;
 
 const BAG_TYPES = ['Tasche', 'Handtasche', 'Rucksack'];
+const HEAD_TYPES = ['Cap', 'Mütze', 'Sonnenbrille'];
+/** worn over a shirt: they get their own compartment between jacket and shirt */
+const LAYER_TYPES = ['Pullover', 'Hoodie', 'Cardigan', 'Sweatshirt', 'Strick'];
 
 /** Where an item sits in an outfit. `other` items carry an explicit slot chosen by the user. */
 export function defaultSlot(group: Group, type: string): Slot {
   switch (group) {
     case 'tops':
-      return 'top';
+      return LAYER_TYPES.includes(type) ? 'layer' : 'top';
     case 'bottoms':
       return 'bottom';
     case 'dresses':
@@ -65,7 +71,7 @@ export function defaultSlot(group: Group, type: string): Slot {
     case 'shoes':
       return 'shoes';
     case 'accessories':
-      return BAG_TYPES.includes(type) ? 'bag' : 'accessory';
+      return BAG_TYPES.includes(type) ? 'bag' : HEAD_TYPES.includes(type) ? 'head' : 'accessory';
     default:
       return 'top';
   }

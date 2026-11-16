@@ -23,7 +23,7 @@ export interface Db {
 }
 
 export function dataDir(): string {
-  return path.resolve(process.env.DATA_DIR || '.data');
+  return path.resolve(/* turbopackIgnore: true */ process.env.DATA_DIR || '.data');
 }
 
 function matches(row: Row, match: Match): boolean {

@@ -30,6 +30,7 @@ export const POST = route(async (req) => {
     data: Buffer.from(await file.arrayBuffer()),
     width: Number(form.get('width')),
     height: Number(form.get('height')),
+    cutout: form.get('cutout') === '1',
   });
   return { item };
 });

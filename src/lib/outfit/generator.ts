@@ -2,7 +2,8 @@
 // It only ever combines pieces from the list it is given (one profile's wardrobe).
 //
 // Approach: sample many candidate combinations, score each on colour harmony, style,
-// weather, occasion, season, formality, favourites and freshness, then pick among the best.
+// weather, time of day, occasion, season, formality, favourites and freshness, then pick
+// among the best.
 import {
   COLOR_BY_ID,
   DEFAULT_META,
@@ -18,7 +19,8 @@ import type { Season, Slot, TypeMeta } from '../taxonomy.ts';
 import type { Item } from '../types.ts';
 
 export type Selection = Partial<Record<Slot, string>>;
-export type Mode = 'random' | 'style' | 'weather' | 'occasion' | 'around' | 'surprise';
+/** auto = weather + place + time of day */
+export type Mode = 'auto' | 'random' | 'style' | 'weather' | 'occasion' | 'around' | 'surprise';
 
 export interface WeatherInput {
   temp: number;
@@ -34,6 +36,8 @@ export interface GenOptions {
   occasion?: string | null;
   weather?: WeatherInput | null;
   season?: Season;
+  /** local time: evenings lean dressier, weekend days more relaxed */
+  when?: { hour: number; weekend: boolean } | null;
   /** slots that must keep their piece */
   locked?: Selection;
   /** the outfit currently shown — the generator tries to return something different */
@@ -101,6 +105,14 @@ export function isWet(w: WeatherInput): boolean {
   return w.rainProb >= 50 || (w.code >= 51 && w.code <= 67) || (w.code >= 80 && w.code <= 99);
 }
 
+export type Daypart = 'morning' | 'day' | 'evening' | 'night';
+export function daypart(hour: number): Daypart {
+  if (hour < 5) return 'night';
+  if (hour < 11) return 'morning';
+  if (hour < 18) return 'day';
+  return 'evening';
+}
+
 const SEASON_FEELS: Record<Season, number> = { Winter: 3, Frühling: 13, Sommer: 24, Herbst: 11 };
 
 function avg(xs: number[], empty = 0.6): number {
@@ -131,9 +143,15 @@ function matchesStyle(item: Item, style: string): number {
   return 0.15;
 }
 
+function rangeFit(value: number, [lo, hi]: [number, number]): number {
+  const dist = value < lo ? lo - value : value > hi ? value - hi : 0;
+  return clamp01(1 - dist / 2);
+}
+
 // ---------- scoring ----------
 
-const CORE: Slot[] = ['top', 'bottom', 'dress', 'outerwear', 'shoes'];
+/** the pieces that define the look (small accessories only count for colour) */
+const CORE: Slot[] = ['top', 'layer', 'bottom', 'dress', 'outerwear', 'shoes'];
 
 export function scoreOutfit(chosen: Item[], opts: GenOptions): { total: number; parts: ScorePart[] } {
   const core = chosen.filter((i) => CORE.includes(i.slot));
@@ -192,16 +210,22 @@ export function scoreOutfit(chosen: Item[], opts: GenOptions): { total: number; 
       );
       parts.push({ key: 'occasion', label: `Anlass ${occ.id}`, value, weight: opts.mode === 'occasion' ? 0.4 : 0.25 });
     }
+  } else if (opts.when && forms.length) {
+    // time of day: evenings a touch dressier, weekend days relaxed, weekdays in between
+    const part = daypart(opts.when.hour);
+    const range: [number, number] = part === 'evening' ? [3, 4.5] : opts.when.weekend ? [1.5, 3] : [2.2, 4];
+    parts.push({ key: 'time', label: 'Tageszeit', value: rangeFit(avg(forms), range), weight: opts.mode === 'auto' ? 0.14 : 0.06 });
   }
 
   // weather (or the season as a stand-in when no live weather is available)
   const w = opts.weather;
   const feels = w ? w.feels : SEASON_FEELS[season];
   const by = (slot: Slot) => chosen.find((i) => i.slot === slot);
-  const upper = by('top') || by('dress');
   const need = clamp01((25 - feels) / 3.6 / 8) * 8 + (w && w.wind > 30 ? 0.4 : 0);
+  // a pullover over a shirt counts mostly as the pullover; the shirt underneath adds a little
+  const shirt = by('top') || by('dress');
   const have =
-    (upper ? warmthOf(upper) * 0.6 : 0) +
+    (by('layer') ? warmthOf(by('layer')!) * 0.6 + (shirt ? warmthOf(shirt) * 0.2 : 0) : shirt ? warmthOf(shirt) * 0.6 : 0) +
     (by('outerwear') ? warmthOf(by('outerwear')!) * 0.8 : 0) +
     (by('bottom') ? warmthOf(by('bottom')!) * 0.2 : by('dress') ? 0.3 : 0) +
     (by('shoes') ? warmthOf(by('shoes')!) * 0.15 : 0);
@@ -225,7 +249,7 @@ export function scoreOutfit(chosen: Item[], opts: GenOptions): { total: number; 
     key: 'weather',
     label: w ? 'Wetter' : 'Jahreszeit (Temperatur)',
     value: clamp01(weather),
-    weight: w ? (opts.mode === 'weather' ? 0.45 : 0.3) : 0.12,
+    weight: w ? (opts.mode === 'weather' || opts.mode === 'auto' ? 0.45 : 0.3) : 0.12,
   });
 
   // season tags set by the user
@@ -269,13 +293,26 @@ function sameSelection(a: Selection, b: Selection): boolean {
   return SLOTS.every((s) => (a[s] || null) === (b[s] || null));
 }
 
+function feelsLike(opts: GenOptions, season: Season): number {
+  return opts.weather ? opts.weather.feels : SEASON_FEELS[season];
+}
+
 function outerwearChance(opts: GenOptions, season: Season): number {
-  const feels = opts.weather ? opts.weather.feels : SEASON_FEELS[season];
+  const feels = feelsLike(opts, season);
   if (feels < 12) return 1;
   if (opts.weather && isWet(opts.weather) && feels < 24) return 0.85;
   if (feels < 18) return 0.6;
   if (feels < 22) return 0.15;
   return 0;
+}
+
+/** how likely a pullover goes over the shirt */
+function layerChance(opts: GenOptions, season: Season): number {
+  const feels = feelsLike(opts, season);
+  if (feels < 10) return 0.9;
+  if (feels < 16) return 0.6;
+  if (feels < 20) return 0.25;
+  return 0.03;
 }
 
 export function generateOutfit(items: Item[], opts: GenOptions): Generated | null {
@@ -292,31 +329,39 @@ export function generateOutfit(items: Item[], opts: GenOptions): Generated | nul
     if (id && byId.get(id)?.slot === s) locked[s] = id;
   }
 
-  const canSeparates = pool.top.length > 0 || pool.bottom.length > 0;
+  const uppers = pool.top.length + pool.layer.length;
+  const canSeparates = uppers > 0 || pool.bottom.length > 0;
   const canDress = pool.dress.length > 0;
-  let dressShare = canDress ? Math.min(0.45, pool.dress.length / (pool.dress.length + Math.max(1, Math.min(pool.top.length, pool.bottom.length)))) : 0;
+  let dressShare = canDress ? Math.min(0.45, pool.dress.length / (pool.dress.length + Math.max(1, Math.min(uppers, pool.bottom.length)))) : 0;
   if (!canSeparates) dressShare = 1;
   if (locked.dress) dressShare = 1;
-  if (locked.top || locked.bottom) dressShare = 0;
+  if (locked.top || locked.layer || locked.bottom) dressShare = 0;
 
   const outerP = outerwearChance(opts, season);
+  const layerP = layerChance(opts, season);
   const accP = opts.mode === 'surprise' ? 0.8 : 0.6;
+  const cold = feelsLike(opts, season) < 8;
   const scored: { sel: Selection; total: number; parts: ScorePart[] }[] = [];
   const seen = new Set<string>();
 
-  for (let n = 0; n < 260; n++) {
+  for (let n = 0; n < 300; n++) {
     const sel: Selection = { ...locked };
     const fill = (slot: Slot, chance = 1) => {
       if (sel[slot] || !pool[slot].length || rng() >= chance) return;
       sel[slot] = pick(pool[slot], rng).id;
     };
-    if (rng() < dressShare) fill('dress');
-    else {
+    if (rng() < dressShare) {
+      fill('dress');
+      fill('layer', layerP * 0.5);
+    } else {
+      // a shirt is the base; without any shirts a pullover takes its place
       fill('top');
+      fill('layer', sel.top ? layerP : 1);
       fill('bottom');
     }
     fill('outerwear', outerP);
     fill('shoes');
+    fill('head', cold ? 0.5 : 0.25);
     fill('accessory', accP);
     fill('bag', 0.4);
 
@@ -361,15 +406,18 @@ const OCCASION_PHRASE: Record<string, string> = {
   Reise: 'einen Reisetag',
 };
 
+const DAYPART_NOUN: Record<Daypart, string> = { morning: 'Morgen', day: 'Tag', evening: 'Abend', night: 'Abend' };
+
 /** One short German sentence on why this outfit fits. */
-export function explainOutfit(chosen: Item[], opts: Pick<GenOptions, 'weather' | 'occasion' | 'style'>): string {
+export function explainOutfit(chosen: Item[], opts: Pick<GenOptions, 'weather' | 'occasion' | 'style' | 'when'>): string {
   const w = opts.weather;
   const bits: string[] = [];
   if (w) bits.push(`${Math.round(w.temp)} °C`);
   if (opts.occasion && OCCASION_PHRASE[opts.occasion]) bits.push(OCCASION_PHRASE[opts.occasion]);
   else if (!opts.style) {
     const formal = avg(chosen.filter((i) => CORE.includes(i.slot)).map((i) => metaOf(i).formality), 3);
-    bits.push(formal >= 3.8 ? 'einen eleganten Auftritt' : formal <= 2.4 ? 'einen entspannten Tag' : 'einen unkomplizierten Tag');
+    const mood = formal >= 3.8 ? 'eleganten' : formal <= 2.4 ? 'entspannten' : 'unkomplizierten';
+    bits.push(`einen ${mood} ${opts.when ? DAYPART_NOUN[daypart(opts.when.hour)] : 'Tag'}`);
   }
   let text = bits.length ? `Perfekt für ${bits.join(' und ')}.` : 'Eine stimmige Kombination aus deinem Kleiderschrank.';
   if (opts.style) text = bits.length ? `${opts.style} – perfekt für ${bits.join(' und ')}.` : `Ganz im Stil ${opts.style}.`;

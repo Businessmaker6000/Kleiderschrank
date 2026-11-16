@@ -62,8 +62,10 @@ export default function TodayPage() {
   const today = useMemo(() => {
     if (!items?.length || !outfits || !now || !weatherSettled) return null;
     return generateOutfit(items, {
-      mode: roll === 0 ? "weather" : "surprise",
+      // weather, place and time of day decide; "Surprise Me" loosens the pick
+      mode: roll === 0 ? "auto" : "surprise",
       weather,
+      when: { hour: now.getHours(), weekend: now.getDay() === 0 || now.getDay() === 6 },
       season: seasonForMonth(now.getMonth()),
       // outfits saved today are left out, so saving today's suggestion does not change it
       history: outfits

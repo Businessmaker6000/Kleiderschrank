@@ -89,13 +89,18 @@ function itemFields(input: Row, partial: boolean): Partial<ItemRow> {
   return out;
 }
 
+/** Built-in categories always derive their compartment from the type, so a changed mapping applies to existing pieces too. */
+function slotOf(r: Pick<ItemRow, 'item_group' | 'type' | 'slot'>): Slot {
+  return r.item_group === 'other' ? r.slot : defaultSlot(r.item_group, r.type);
+}
+
 function toItem(r: ItemRow, img: ImageRow | undefined): Item {
   return {
     id: r.id,
     name: r.name,
     group: r.item_group,
     type: r.type,
-    slot: r.slot,
+    slot: slotOf(r),
     colors: r.colors || [],
     pattern: r.pattern,
     material: r.material,
@@ -105,7 +110,7 @@ function toItem(r: ItemRow, img: ImageRow | undefined): Item {
     favorite: !!r.favorite,
     wear_count: r.wear_count || 0,
     created_at: r.created_at,
-    image: img ? { path: img.path, width: img.width, height: img.height } : null,
+    image: img ? { path: img.path, width: img.width, height: img.height, cutout: isCutoutPath(img.path) } : null,
   };
 }
 
@@ -129,15 +134,61 @@ export function sniffImage(data: Buffer): { ext: string; contentType: string } |
   return null;
 }
 
-export async function createItem(
-  profileId: string,
-  input: Row,
-  image: { data: Buffer; width: unknown; height: unknown },
-): Promise<Item> {
-  if (!image.data.length) throw new ApiError(400, 'Es wurde kein Bild übermittelt.');
-  if (image.data.length > MAX_IMAGE_BYTES) throw new ApiError(413, 'Das Bild ist zu gross (maximal 8 MB).');
-  const kind = sniffImage(image.data);
+interface ImageInput {
+  data: Buffer;
+  width: unknown;
+  height: unknown;
+  /** background removed on the device */
+  cutout?: boolean;
+}
+
+function checkImage(data: Buffer): { ext: string; contentType: string } {
+  if (!data.length) throw new ApiError(400, 'Es wurde kein Bild übermittelt.');
+  if (data.length > MAX_IMAGE_BYTES) throw new ApiError(413, 'Das Bild ist zu gross (maximal 8 MB).');
+  const kind = sniffImage(data);
   if (!kind) throw new ApiError(415, 'Dieses Bildformat wird nicht unterstützt (JPEG, PNG oder WebP).');
+  return kind;
+}
+
+// Cut-outs are marked in the file name (".c."), so no extra database column is needed.
+// Every upload gets a fresh name because image URLs are cached forever by the browser.
+function imagePath(profileId: string, itemId: string, ext: string, cutout: boolean): string {
+  return `${profileId}/${itemId}-${randomUUID().slice(0, 8)}${cutout ? '.c' : ''}.${ext}`;
+}
+
+function isCutoutPath(p: string): boolean {
+  return /\.c\.[a-z]+$/.test(p);
+}
+
+function imageRow(profileId: string, itemId: string, image: ImageInput, kind: { ext: string; contentType: string }): ImageRow {
+  return {
+    id: randomUUID(),
+    item_id: itemId,
+    profile_id: profileId,
+    // JPEG has no transparency, so it can never be a cut-out
+    path: imagePath(profileId, itemId, kind.ext, image.cutout === true && kind.ext !== 'jpg'),
+    width: Math.round(num(image.width, 1, 10000) ?? 1000),
+    height: Math.round(num(image.height, 1, 10000) ?? 1000),
+    content_type: kind.contentType,
+  };
+}
+
+/** Replaces the photo of a piece (e.g. removing the background of an older upload). */
+export async function replaceImage(profileId: string, id: string, image: ImageInput): Promise<Item> {
+  const row = await ownItem(profileId, id);
+  const kind = checkImage(image.data);
+  const old = await db().select<ImageRow>('clothing_images', { item_id: id, profile_id: profileId });
+  const next = imageRow(profileId, id, image, kind);
+  // new file and row first, then drop the old ones: the piece is never without a photo
+  await db().putFile(next.path, image.data, kind.contentType);
+  await db().insert('clothing_images', [next as unknown as Row]);
+  await db().remove('clothing_images', { id: old.map((o) => o.id), profile_id: profileId });
+  await db().removeFiles(old.map((o) => o.path)).catch(() => {});
+  return toItem(row, next);
+}
+
+export async function createItem(profileId: string, input: Row, image: ImageInput): Promise<Item> {
+  const kind = checkImage(image.data);
   const fields = itemFields(input, false);
   const row: ItemRow = {
     id: randomUUID(),
@@ -156,15 +207,7 @@ export async function createItem(
     wear_count: 0,
     created_at: new Date().toISOString(),
   };
-  const img: ImageRow = {
-    id: randomUUID(),
-    item_id: row.id,
-    profile_id: profileId,
-    path: `${profileId}/${row.id}.${kind.ext}`,
-    width: Math.round(num(image.width, 1, 10000) ?? 1000),
-    height: Math.round(num(image.height, 1, 10000) ?? 1000),
-    content_type: kind.contentType,
-  };
+  const img = imageRow(profileId, row.id, image, kind);
   // file first: a row must never point at a missing image
   await db().putFile(img.path, image.data, kind.contentType);
   try {
@@ -287,7 +330,7 @@ async function resolveEntries(profileId: string, raw: unknown): Promise<OutfitEn
   const bySlot = new Map<Slot, string>();
   for (const id of ids) {
     const row = rows.find((r) => r.id === id)!;
-    if (!bySlot.has(row.slot)) bySlot.set(row.slot, row.id);
+    if (!bySlot.has(slotOf(row))) bySlot.set(slotOf(row), row.id);
   }
   return SLOTS.filter((s) => bySlot.has(s)).map((slot) => ({ slot, item_id: bySlot.get(slot)! }));
 }

@@ -175,6 +175,7 @@ const KOLE = [
   [{ group: 'shoes', type: 'Boots', name: 'Braune Boots', colors: ['Braun'], styles: ['Classic'] }, 'shoes', '#6b4a34'],
   [{ group: 'accessories', type: 'Uhr', name: 'Silberne Uhr', colors: ['Silber'] }, 'watch', '#8c9096'],
   [{ group: 'accessories', type: 'Rucksack', name: 'Schwarzer Rucksack', colors: ['Schwarz'] }, 'bag', '#2a2a2a'],
+  [{ group: 'accessories', type: 'Mütze', name: 'Graue Mütze', colors: ['Grau'], seasons: ['Herbst', 'Winter'] }, 'bag', '#8c8c8c'],
 ];
 const ALISHA = [
   [{ group: 'dresses', type: 'Kleid', name: 'Mauve Midikleid', colors: ['Mauve'], styles: ['Chic', 'Date Night'] }, 'dress', '#a98794'],

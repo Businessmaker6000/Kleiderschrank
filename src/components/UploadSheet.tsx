@@ -16,6 +16,8 @@ interface Entry {
   image: PreparedImage | null;
   draft: ItemDraft;
   error: string | null;
+  /** progress of the background removal, 0…1 */
+  progress: number;
   /** AI suggestion state for this photo */
   ai: "idle" | "running" | "done" | "none";
 }
@@ -60,11 +62,11 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
     const gen = generation.current;
     const base = entries.length;
     const list = Array.from(files).slice(0, 20);
-    setEntries((prev) => [...prev, ...list.map((file) => ({ file, image: null, draft: emptyDraft(), error: null, ai: "idle" as const }))]);
+    setEntries((prev) => [...prev, ...list.map((file) => ({ file, image: null, draft: emptyDraft(), error: null, progress: 0, ai: "idle" as const }))]);
     // photos are prepared one after the other to keep memory low on phones
     for (let k = 0; k < list.length; k++) {
       try {
-        const image = await prepareImage(list[k]);
+        const image = await prepareImage(list[k], { onProgress: (p) => generation.current === gen && patch(base + k, { progress: p }) });
         if (generation.current !== gen) return URL.revokeObjectURL(image.previewUrl);
         patch(base + k, (e) => ({ image, draft: { ...e.draft, colors: e.draft.colors.length || !image.color ? e.draft.colors : [image.color] } }));
       } catch (err) {
@@ -123,6 +125,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
       form.append("image", current.image.blob, "photo");
       form.append("width", String(current.image.width));
       form.append("height", String(current.image.height));
+      if (current.image.cutout) form.append("cutout", "1");
       form.append("meta", JSON.stringify(current.draft));
       const { item } = await upload<{ item: Item }>("/api/items", form, setProgress);
       // show the new piece immediately, then confirm with the server
@@ -178,7 +181,7 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
       {picking ? (
         <div className="space-y-3 pt-2">
           <p className="pb-2 text-sm leading-relaxed text-muted">
-            Am schönsten wirken Fotos auf hellem, ruhigem Hintergrund – flach hingelegt oder am Bügel, bei Tageslicht.
+            Der Hintergrund wird automatisch entfernt, übrig bleibt nur das Kleidungsstück. Am besten gelingt das, wenn es flach liegt oder am Bügel hängt und sich klar vom Hintergrund abhebt.
           </p>
           <button
             type="button"
@@ -214,13 +217,26 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
               <div className="mx-auto flex aspect-[3/4] w-40 items-center justify-center overflow-hidden rounded-2xl bg-tile p-3 md:w-full">
                 {current.image ? (
                   // eslint-disable-next-line @next/next/no-img-element -- local preview blob
-                  <img src={current.image.previewUrl} alt="Vorschau des Fotos" className="size-full object-contain mix-blend-multiply" />
+                  <img
+                    src={current.image.previewUrl}
+                    alt="Vorschau des Fotos"
+                    className={current.image.cutout ? "size-full object-contain drop-shadow-[0_5px_7px_rgb(0_0_0/0.16)]" : "size-full object-contain mix-blend-multiply"}
+                  />
                 ) : current.error ? (
                   <p className="px-2 text-center text-xs text-danger">{current.error}</p>
                 ) : (
-                  <div className="skeleton size-full rounded-xl" aria-label="Foto wird vorbereitet" />
+                  <div className="skeleton flex size-full items-end justify-center rounded-xl p-3" role="status">
+                    <span className="rounded-full bg-surface/90 px-3 py-1.5 text-center text-[11px] leading-tight text-ink">
+                      Hintergrund wird entfernt{current.progress > 0 ? ` … ${Math.round(current.progress * 100)} %` : " …"}
+                    </span>
+                  </div>
                 )}
               </div>
+              {current.image && !current.image.cutout && (
+                <p className="mt-3 text-center text-xs leading-relaxed text-muted">
+                  Der Hintergrund liess sich nicht entfernen – das Foto wird unverändert gespeichert.
+                </p>
+              )}
               {current.ai === "running" && (
                 <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted" role="status">
                   <Sparkles className="size-3.5 animate-pulse" aria-hidden /> Kleidungsstück wird erkannt …

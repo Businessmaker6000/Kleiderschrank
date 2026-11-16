@@ -22,7 +22,7 @@ export function Button({ variant = "primary", size = "md", loading, className, c
       type="button"
       disabled={disabled || loading}
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-full font-medium tracking-wide transition active:scale-[0.98] disabled:opacity-45 disabled:active:scale-100",
+        "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full font-medium tracking-wide transition active:scale-[0.98] disabled:opacity-45 disabled:active:scale-100",
         size === "md" ? "h-12 px-6 text-sm" : "h-10 px-4 text-[13px]",
         variant === "primary" && "bg-primary text-primary-ink hover:opacity-90",
         variant === "outline" && "border border-line bg-surface text-ink hover:border-ink/40",

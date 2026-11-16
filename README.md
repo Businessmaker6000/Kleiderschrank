@@ -5,7 +5,7 @@ Mobile-first Web-App, installierbar als PWA.
 
 - **Today** – Begrüssung, Live-Wetter, Outfit des Tages
 - **Wardrobe** – Kleidung fotografieren/hochladen, kategorisieren, filtern, suchen
-- **Create** – visueller Outfit Builder (Collage, Pfeile, Sperren, Generator)
+- **Create** – Outfit Builder mit Abteilen von Kopf bis Fuss (Kopf, Jacke, Pulli, Shirt, Hose, Schuhe, Schmuck, Tasche), Pfeilen, Sperren, Filtern und Generator
 - **Boards** – gespeicherte Outfits als Masonry-Board mit Kollektionen
 - **Profile** – Stilpräferenzen, Standort, PIN und Passwort
 
@@ -120,8 +120,10 @@ Ohne Wetterdaten rechnet er mit der Jahreszeit.
 
 ## Bekannte Grenzen
 
-- **Hintergrundentfernung** ist nicht eingebaut. Fotos auf hellem Hintergrund verschmelzen durch die Darstellung
-  (`mix-blend-mode: multiply`) mit der Collage; Fotos auf dunklem oder unruhigem Hintergrund bleiben als Rechteck sichtbar.
+- **Hintergrundentfernung** läuft beim Upload automatisch im Browser (`@imgly/background-removal`, AGPL-lizenziert).
+  Das Foto verlässt dafür das Gerät nicht; nur das KI-Modell wird beim ersten Mal geladen (einige Dutzend MB, danach im
+  Browser-Cache). Auf älteren Handys kann das 20–40 Sekunden dauern. Gelingt es nicht, wird das Foto unverändert
+  gespeichert und lässt sich später im Kleidungsstück über „Hintergrund entfernen" nachbearbeiten.
 - **Tabellen `categories` / `styles`:** Die festen Kategorien und Stile stehen im Code (`taxonomy.ts`);
   in der Datenbank liegen nur eigene Kategorien (`custom_categories`). Stile sind Text-Arrays an Kleidungsstück und Outfit.
 - **Offline:** Die App braucht Internet. Offline erscheint eine Hinweisseite.

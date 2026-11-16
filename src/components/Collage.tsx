@@ -37,7 +37,8 @@ export function ItemImage({ item, className, eager }: { item: Item; className?: 
       loading={eager ? "eager" : "lazy"}
       decoding="async"
       draggable={false}
-      className={cx("object-contain mix-blend-multiply select-none", className)}
+      // cut-outs float on the tile with a soft shadow; plain photos blend their light background into it
+      className={cx("object-contain select-none", item.image!.cutout ? "drop-shadow-[0_5px_7px_rgb(0_0_0/0.16)]" : "mix-blend-multiply", className)}
     />
   );
 }
@@ -164,7 +165,8 @@ export function resolveItems(entries: { slot: Slot; item_id: string }[] | Partia
   const list = Array.isArray(entries) ? entries : Object.entries(entries).map(([slot, item_id]) => ({ slot: slot as Slot, item_id: item_id as string }));
   for (const e of list) {
     const item = byId.get(e.item_id);
-    if (item) out[e.slot] = item;
+    // the piece itself knows its compartment (stored slots may predate a mapping change)
+    if (item && !out[item.slot]) out[item.slot] = item;
   }
   return out;
 }
