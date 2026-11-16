@@ -5,12 +5,12 @@
 //   npm run dev            (in one terminal, fresh .data directory)
 //   node scripts/e2e.mjs   (in another)
 //
-// Environment: BASE_URL, E2E_PASSWORD, SETUP_CODE (if the server requires one).
+// Environment: BASE_URL, E2E_PIN, SETUP_CODE (if the server requires one).
 import assert from 'node:assert/strict';
 import { deflateSync } from 'node:zlib';
 
 const BASE = process.env.BASE_URL || 'http://localhost:3000';
-const PASSWORD = process.env.E2E_PASSWORD || 'wardrobe-e2e-passwort';
+const PIN = process.env.E2E_PIN || '5474';
 
 // ---------- tiny PNG painter (flat garment silhouettes on white) ----------
 const W = 360;
@@ -199,41 +199,40 @@ await step('unauthenticated requests are rejected', async () => {
 });
 
 await step('first-time setup validates input and signs the device in', async () => {
-  assert.equal((await phone('/api/auth/setup', { body: { password: 'kurz', setupCode: process.env.SETUP_CODE } })).status, 400);
-  const r = await phone('/api/auth/setup', { body: { password: PASSWORD, setupCode: process.env.SETUP_CODE } });
+  assert.equal((await phone('/api/auth/setup', { body: { pin: '12', setupCode: process.env.SETUP_CODE } })).status, 400);
+  const r = await phone('/api/auth/setup', { body: { pin: PIN, setupCode: process.env.SETUP_CODE } });
   assert.equal(r.status, 200, JSON.stringify(r.data) + ' — is the data store empty?');
-  assert.equal((await phone('/api/auth/setup', { body: { password: PASSWORD } })).status, 409);
+  assert.equal((await phone('/api/auth/setup', { body: { pin: PIN } })).status, 409);
 });
 
-await step('session cookies are httpOnly', async () => {
-  const r = await laptop('/api/auth/login', { body: { password: PASSWORD } });
+await step('the PIN opens the app; a wrong PIN does not; cookies are httpOnly', async () => {
+  assert.equal((await device()('/api/auth/login', { body: { pin: '0000' } })).status, 401);
+  const r = await laptop('/api/auth/login', { body: { pin: PIN } });
   assert.equal(r.status, 200);
   assert.match(r.headers.getSetCookie().join(), /wd_device=.*HttpOnly/i);
-  assert.equal((await device()('/api/auth/login', { body: { password: 'falsches-passwort' } })).status, 401);
 });
 
-await step('device login alone does not open a profile', async () => {
+await step('the PIN alone does not open a wardrobe; profile names stay hidden before it', async () => {
   assert.equal((await phone('/api/items')).status, 401);
+  const locked = new TextDecoder().decode((await device()('/')).data);
+  assert.ok(!/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/.test(locked), 'no profile ids before the PIN');
+  assert.match(locked, /PIN eingeben/);
 });
 
-await step('PIN 5474 unlocks each profile; wrong PIN does not', async () => {
+await step('after the PIN either profile can be chosen', async () => {
   const html = new TextDecoder().decode((await phone('/')).data);
-  const ids = [...html.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)].map((m) => m[0]);
+  const ids = [...new Set([...html.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)].map((m) => m[0]))];
   assert.ok(ids.length >= 2, 'profile selection lists both profiles');
-  for (const id of new Set(ids)) {
-    const bad = await device()('/api/auth/unlock', { body: { profileId: id, pin: '5474' } });
-    assert.equal(bad.status, 401, 'PIN without device session must fail');
-  }
-  for (const id of new Set(ids)) {
-    assert.equal((await phone('/api/auth/unlock', { body: { profileId: id, pin: '0000' } })).status, 401);
-    const r = await phone('/api/auth/unlock', { body: { profileId: id, pin: '5474' } });
+  for (const id of ids) {
+    assert.equal((await device()('/api/auth/unlock', { body: { profileId: id } })).status, 401, 'choosing a profile without the PIN must fail');
+    const r = await phone('/api/auth/unlock', { body: { profileId: id } });
     if (r.status !== 200) continue;
     if (r.data.profile.slug === 'kole') koleId = id;
     if (r.data.profile.slug === 'alisha') alishaId = id;
   }
   assert.ok(koleId && alishaId);
-  assert.equal((await phone('/api/auth/unlock', { body: { profileId: koleId, pin: '5474' } })).status, 200);
-  assert.equal((await laptop('/api/auth/unlock', { body: { profileId: alishaId, pin: '5474' } })).status, 200);
+  assert.equal((await phone('/api/auth/unlock', { body: { profileId: koleId } })).status, 200);
+  assert.equal((await laptop('/api/auth/unlock', { body: { profileId: alishaId } })).status, 200);
   assert.equal((await phone('/api/me')).data.profile.name, 'Kole');
   assert.equal((await laptop('/api/me')).data.profile.name, 'Alisha');
 });
@@ -305,8 +304,8 @@ await step('everything survives lock, logout and a new device', async () => {
   assert.equal((await phone('/api/items')).status, 401);
   await phone('/api/auth/logout', { method: 'POST' });
   const tablet = device();
-  assert.equal((await tablet('/api/auth/login', { body: { password: PASSWORD } })).status, 200);
-  assert.equal((await tablet('/api/auth/unlock', { body: { profileId: koleId, pin: '5474' } })).status, 200);
+  assert.equal((await tablet('/api/auth/login', { body: { pin: PIN } })).status, 200);
+  assert.equal((await tablet('/api/auth/unlock', { body: { profileId: koleId } })).status, 200);
   const items = (await tablet('/api/items')).data.items;
   assert.equal(items.length, KOLE.length);
   assert.ok(items.find((i) => i.id === koleItems[0].id).favorite);
@@ -314,7 +313,7 @@ await step('everything survives lock, logout and a new device', async () => {
   assert.equal((await tablet(`/api/images/${koleItems[3].image.path}`)).status, 200);
   // switching profile on the same device swaps the data completely
   await tablet('/api/auth/lock', { method: 'POST' });
-  assert.equal((await tablet('/api/auth/unlock', { body: { profileId: alishaId, pin: '5474' } })).status, 200);
+  assert.equal((await tablet('/api/auth/unlock', { body: { profileId: alishaId } })).status, 200);
   assert.equal((await tablet('/api/items')).data.items.length, ALISHA.length);
 });
 

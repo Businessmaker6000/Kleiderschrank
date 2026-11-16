@@ -39,7 +39,7 @@ export default async function SetupPage() {
     <AuthFrame
       eyebrow="Wardrobe · Einrichtung"
       title="Willkommen."
-      text="Einmalig legt ihr ein gemeinsames Passwort fest. Es schützt die App nach aussen; die PINs trennen danach eure beiden Profile."
+      text="Einmalig legt ihr euren vierstelligen PIN fest. Damit öffnet ihr die App, danach wählt ihr euer Profil."
     >
       <SetupForm needsCode={setupCodeRequired()} />
     </AuthFrame>

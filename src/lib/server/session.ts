@@ -1,5 +1,5 @@
-// Cookie sessions (httpOnly, signed). `wd_device` proves the household login,
-// `wd_profile` proves that a profile was unlocked with its PIN on this device.
+// Cookie sessions (httpOnly, signed). `wd_device` proves the PIN was entered on this
+// device, `wd_profile` remembers which profile was chosen afterwards.
 import { cookies, headers } from 'next/headers';
 import { getAccount, getProfile } from './auth';
 import type { AccountRow, ProfileRow } from './auth';
@@ -8,8 +8,8 @@ import { ApiError } from './errors';
 
 const DEVICE_COOKIE = 'wd_device';
 const PROFILE_COOKIE = 'wd_profile';
-const DEVICE_MAX_AGE = 60 * 60 * 24 * 60; // 60 days
-const PROFILE_MAX_AGE = 60 * 60 * 12; // 12 hours, then the PIN is asked again
+const DEVICE_MAX_AGE = 60 * 60 * 12; // 12 hours, then the PIN is asked again
+const PROFILE_MAX_AGE = 60 * 60 * 12;
 
 function cookieOptions(maxAge: number) {
   return {
@@ -47,13 +47,13 @@ export async function getSession(): Promise<{ account: AccountRow; profile: Prof
 
 export async function requireAccount(): Promise<AccountRow> {
   const account = await getDeviceAccount();
-  if (!account) throw new ApiError(401, 'Bitte zuerst anmelden.', { reason: 'device' });
+  if (!account) throw new ApiError(401, 'Bitte zuerst den PIN eingeben.', { reason: 'device' });
   return account;
 }
 
 export async function requireProfile(): Promise<{ account: AccountRow; profile: ProfileRow }> {
   const session = await getSession();
-  if (!session) throw new ApiError(401, 'Profil ist gesperrt.', { reason: 'profile' });
+  if (!session) throw new ApiError(401, 'Bitte ein Profil wählen.', { reason: 'profile' });
   return session;
 }
 

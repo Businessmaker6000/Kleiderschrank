@@ -24,9 +24,9 @@ aber nur auf diesem einen Rechner. Für den Zugriff von mehreren Geräten brauch
 
 Beim ersten Aufruf führt die App durch die Einrichtung:
 
-1. Gemeinsames Passwort festlegen (mindestens 10 Zeichen). Es meldet neue Geräte an.
-2. Profil wählen, PIN eingeben. Start-PIN für beide Profile: `5474`.
-3. PIN unter **Profile → Sicherheit** ändern.
+1. Vierstelligen PIN festlegen.
+2. PIN eingeben, dann Kole oder Alisha wählen.
+3. Den PIN ändert ihr später unter **Profile → Sicherheit**.
 
 ## Produktion: Supabase + Hosting
 
@@ -66,20 +66,20 @@ Danach die URL öffnen, die Einrichtung mit dem `SETUP_CODE` abschliessen und di
 
 ## Sicherheit
 
-- **Zwei Stufen.** Das gemeinsame Passwort schützt die App nach aussen (Geräte-Session, 60 Tage).
-  Der vierstellige PIN ist die Profilsperre zwischen euch beiden (12 Stunden, dann wieder PIN).
-- **Nur gehasht.** Passwort und PINs werden serverseitig mit scrypt und eigenem Salt gespeichert und geprüft.
-  Im Frontend steht kein PIN.
-- **Schutz gegen Raten.** 5 falsche PINs sperren das Profil für 1 Minute, danach verdoppelt sich die Sperre (maximal 1 Stunde).
-  Beim Login: 8 Fehlversuche pro Adresse, zusätzlich eine globale Grenze. Die Zähler liegen in der Datenbank.
-- **Profiltrennung auf dem Server.** Der Browser spricht nie direkt mit Supabase. Jede API-Route liest das entsperrte
+- **Nur der PIN.** Ein gemeinsamer vierstelliger PIN öffnet die App auf einem Gerät (12 Stunden, dann wieder PIN).
+  Danach wählt man Kole oder Alisha. Ein Passwort gibt es nicht.
+- **Nur gehasht.** Der PIN wird serverseitig mit scrypt und eigenem Salt gespeichert und geprüft. Im Frontend steht er nicht.
+- **Schutz gegen Raten.** 5 falsche PINs sperren die Eingabe für diese Adresse 1 Minute lang, danach verdoppelt sich
+  die Sperre (maximal 1 Stunde). Zusätzlich gilt eine Grenze über alle Adressen hinweg. Die Zähler liegen in der Datenbank.
+- **Profiltrennung auf dem Server.** Der Browser spricht nie direkt mit Supabase. Jede API-Route liest das gewählte
   Profil aus dem signierten httpOnly-Cookie und filtert jede Abfrage danach. Fotos werden nur über eine geschützte
-  Route ausgeliefert; der Storage-Bucket ist privat. RLS ist auf allen Tabellen aktiv und ohne Policies – der
-  öffentliche anon-Key kann nichts lesen.
-- **Passwort ändern** meldet alle anderen Geräte ab.
+  Route ausgeliefert; der Storage-Bucket ist privat. RLS ist auf allen Tabellen aktiv und ohne Policies.
+- **PIN ändern** meldet alle anderen Geräte ab.
 
-Der PIN ist bewusst eine Komfortsperre: Wer das gemeinsame Passwort kennt und den PIN der anderen Person errät,
-kommt in deren Profil.
+**Wichtig:** Ein vierstelliger PIN ist der einzige Schutz einer öffentlich erreichbaren Adresse. Es gibt nur
+10 000 Möglichkeiten; die Sperren bremsen das Durchprobieren stark, schliessen es über Wochen aber nicht aus, und wer
+absichtlich falsche PINs eingibt, kann die Eingabe zeitweise für alle blockieren. Die beiden Profile sind getrennte
+Kleiderschränke, aber kein Geheimnis voreinander: Wer den PIN kennt, kann beide öffnen.
 
 ## Tests
 

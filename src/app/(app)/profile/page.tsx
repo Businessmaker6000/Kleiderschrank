@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, KeyRound, LogOut, MapPin, ShieldCheck, Trash2, Users } from "lucide-react";
+import { ChevronRight, KeyRound, Lock, MapPin, Trash2, Users } from "lucide-react";
 import { useState } from "react";
 import { mutate } from "swr";
 import { PageHeader, switchProfile, useProfile } from "@/components/AppShell";
@@ -41,7 +41,7 @@ export default function ProfilePage() {
   const { items } = useItems();
   const { outfits } = useOutfits();
   const { weather, status } = useWeather();
-  const [sheet, setSheet] = useState<"pin" | "password" | "city" | null>(null);
+  const [sheet, setSheet] = useState<"pin" | "city" | null>(null);
 
   async function toggleStyle(style: string) {
     if (!me) return;
@@ -69,7 +69,7 @@ export default function ProfilePage() {
 
   async function logout() {
     await api("/api/auth/logout", { method: "POST" }).catch(() => {});
-    window.location.assign("/login");
+    window.location.assign("/");
   }
 
   const location =
@@ -142,20 +142,14 @@ export default function ProfilePage() {
             </p>
           )}
           <div className={card}>
-            <Row icon={<KeyRound className="size-5" strokeWidth={1.5} />} title="PIN ändern" text="Vierstelliger PIN für dein Profil" onClick={() => setSheet("pin")} />
-            <Row
-              icon={<ShieldCheck className="size-5" strokeWidth={1.5} />}
-              title="Gemeinsames Passwort ändern"
-              text="Meldet alle anderen Geräte ab"
-              onClick={() => setSheet("password")}
-            />
+            <Row icon={<KeyRound className="size-5" strokeWidth={1.5} />} title="PIN ändern" text="Gilt für euch beide und meldet andere Geräte ab" onClick={() => setSheet("pin")} />
           </div>
         </Section>
 
         <Section title="Sitzung">
           <div className={card}>
-            <Row icon={<Users className="size-5" strokeWidth={1.5} />} title="Profil wechseln" text="Sperrt dein Profil auf diesem Gerät" onClick={() => void switchProfile()} />
-            <Row icon={<LogOut className="size-5" strokeWidth={1.5} />} title="Gerät abmelden" text="Danach ist wieder das Passwort nötig" onClick={logout} />
+            <Row icon={<Users className="size-5" strokeWidth={1.5} />} title="Profil wechseln" text="Zurück zur Auswahl Kole oder Alisha" onClick={() => void switchProfile()} />
+            <Row icon={<Lock className="size-5" strokeWidth={1.5} />} title="App sperren" text="Danach ist wieder der PIN nötig" onClick={logout} />
           </div>
         </Section>
 
@@ -165,7 +159,6 @@ export default function ProfilePage() {
       </div>
 
       {sheet === "pin" && <PinSheet onClose={() => setSheet(null)} />}
-      {sheet === "password" && <PasswordSheet onClose={() => setSheet(null)} />}
       <CityPicker open={sheet === "city"} onClose={() => setSheet(null)} />
     </div>
   );
@@ -202,6 +195,7 @@ function PinSheet({ onClose }: { onClose: () => void }) {
   return (
     <Sheet open onClose={onClose} title="PIN ändern">
       <form onSubmit={submit} className="space-y-5 pt-2">
+        <p className="text-sm leading-relaxed text-muted">Der PIN gilt für euch beide. Alle anderen Geräte müssen ihn danach neu eingeben.</p>
         <Field label="Aktueller PIN">
           <Input {...pinProps} value={current} onChange={(e) => setCurrent(digits(e.target.value))} autoComplete="off" autoFocus />
         </Field>
@@ -220,49 +214,3 @@ function PinSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
-function PasswordSheet({ onClose }: { onClose: () => void }) {
-  const toast = useToast();
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
-  const [repeat, setRepeat] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setError("");
-    if (next.length < 10) return setError("Das neue Passwort muss mindestens 10 Zeichen lang sein.");
-    if (next !== repeat) return setError("Die beiden neuen Passwörter stimmen nicht überein.");
-    setBusy(true);
-    try {
-      await api("/api/auth/password", { body: { current, next }, redirectOn401: false });
-      toast("Passwort geändert");
-      onClose();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Sheet open onClose={onClose} title="Passwort ändern">
-      <form onSubmit={submit} className="space-y-5 pt-2">
-        <p className="text-sm leading-relaxed text-muted">Das Passwort gilt für euch beide. Alle anderen Geräte müssen sich danach neu anmelden.</p>
-        <Field label="Aktuelles Passwort">
-          <Input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" required />
-        </Field>
-        <Field label="Neues Passwort">
-          <Input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" required />
-        </Field>
-        <Field label="Neues Passwort wiederholen">
-          <Input type="password" value={repeat} onChange={(e) => setRepeat(e.target.value)} autoComplete="new-password" required />
-        </Field>
-        <ErrorText>{error}</ErrorText>
-        <Button type="submit" className="w-full" loading={busy}>
-          Passwort speichern
-        </Button>
-      </form>
-    </Sheet>
-  );
-}

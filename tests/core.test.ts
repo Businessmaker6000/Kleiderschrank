@@ -51,7 +51,7 @@ let alisha: string;
 let accountId: string;
 
 before(async () => {
-  const account = await auth.setupAccount({ password: 'ein-langes-passwort' }, 'test');
+  const account = await auth.setupAccount({ pin: '5474' }, 'test');
   accountId = account.id;
   const profiles = await auth.listProfiles(account.id);
   kole = profiles.find((p) => p.slug === 'kole')!.id;
@@ -62,57 +62,61 @@ after(() => rmSync(dir, { recursive: true, force: true }));
 
 const status = (code: number) => (e: unknown) => (e as { status?: number }).status === code;
 
-describe('authentication', () => {
-  test('setup creates exactly two profiles and cannot run twice', async () => {
+describe('access with the shared PIN', () => {
+  test('setup creates exactly two profiles, validates the PIN and cannot run twice', async () => {
     const profiles = await auth.listProfiles(accountId);
     assert.deepEqual(profiles.map((p) => p.name), ['Kole', 'Alisha']);
-    await assert.rejects(auth.setupAccount({ password: 'noch-ein-passwort' }, 'test'), status(409));
+    await assert.rejects(auth.setupAccount({ pin: '1234' }, 'test'), status(409));
   });
 
-  test('secrets are stored hashed, never in clear text', async () => {
+  test('the PIN is stored hashed, never in clear text', async () => {
     const raw = readFileSync(path.join(dir, 'db.json'), 'utf8');
     assert.ok(!raw.includes('5474'));
-    assert.ok(!raw.includes('ein-langes-passwort'));
     const profiles = await auth.listProfiles(accountId);
     assert.match(profiles[0].pin_hash, /^scrypt\$/);
     assert.notEqual(profiles[0].pin_hash, profiles[1].pin_hash, 'same PIN must give different hashes (salt)');
   });
 
-  test('login accepts the right password only', async () => {
-    await assert.rejects(auth.login('falsch-falsch', 'ip-a'), status(401));
-    assert.equal((await auth.login('ein-langes-passwort', 'ip-a')).id, accountId);
+  test('only the right PIN opens the app', async () => {
+    assert.equal((await auth.enterWithPin('5474', 'ip-a')).id, accountId);
+    await assert.rejects(auth.enterWithPin('0000', 'ip-a'), status(401));
+    await assert.rejects(auth.enterWithPin('54740', 'ip-a'), status(401));
+    await assert.rejects(auth.enterWithPin('', 'ip-a'), status(401));
+    await assert.rejects(auth.enterWithPin(5474, 'ip-a'), status(401));
   });
 
-  test('login locks after repeated failures', async () => {
-    for (let i = 0; i < 8; i++) await assert.rejects(auth.login('x', 'ip-b'));
-    await assert.rejects(auth.login('ein-langes-passwort', 'ip-b'), status(429));
-    // another address is unaffected
-    assert.ok(await auth.login('ein-langes-passwort', 'ip-c'));
+  test('five wrong PINs lock that address, even for the right PIN; other addresses still work', async () => {
+    for (let i = 0; i < 5; i++) await assert.rejects(auth.enterWithPin('1111', 'ip-b'), status(401));
+    await assert.rejects(auth.enterWithPin('5474', 'ip-b'), status(429));
+    assert.ok(await auth.enterWithPin('5474', 'ip-c'));
   });
 
-  test('initial PIN 5474 unlocks, wrong PIN does not', async () => {
-    assert.equal((await auth.unlockProfile(accountId, kole, '5474')).slug, 'kole');
-    await assert.rejects(auth.unlockProfile(accountId, kole, '0000'), status(401));
-    await assert.rejects(auth.unlockProfile(accountId, kole, '54740'), status(401));
-    await assert.rejects(auth.unlockProfile('other-account', kole, '5474'), status(404));
+  test('guessing from many addresses trips the global lock', async () => {
+    await db().remove('rate_limits', { key: 'pin:global' });
+    for (let i = 0; i < 20; i++) await assert.rejects(auth.enterWithPin('2222', `many-${i}`), status(401));
+    await assert.rejects(auth.enterWithPin('5474', 'fresh-address'), status(429));
+    await db().remove('rate_limits', { key: 'pin:global' });
+    assert.ok(await auth.enterWithPin('5474', 'fresh-address'));
   });
 
-  test('five wrong PINs lock the profile, even for the right PIN; the other profile stays usable', async () => {
-    await auth.unlockProfile(accountId, alisha, '5474'); // resets counter
-    for (let i = 0; i < 5; i++) await assert.rejects(auth.unlockProfile(accountId, alisha, '1111'), status(401));
-    await assert.rejects(auth.unlockProfile(accountId, alisha, '5474'), status(429));
-    assert.ok(await auth.unlockProfile(accountId, kole, '5474'));
-    await db().remove('rate_limits', { key: `pin:${alisha}` });
+  test('after the PIN either profile can be opened, but only profiles of this account', async () => {
+    assert.equal((await auth.openProfile(accountId, kole)).slug, 'kole');
+    assert.equal((await auth.openProfile(accountId, alisha)).slug, 'alisha');
+    await assert.rejects(auth.openProfile(accountId, 'does-not-exist'), status(404));
+    await assert.rejects(auth.openProfile('other-account', kole), status(404));
+    await assert.rejects(auth.openProfile(accountId, undefined), status(400));
   });
 
-  test('PIN can be changed and the old one stops working', async () => {
-    const profile = (await auth.getProfile(accountId, kole))!;
-    await assert.rejects(auth.changePin(profile, '0000', '1234'), status(401));
-    await assert.rejects(auth.changePin(profile, '5474', '12a4'), status(400));
-    await auth.changePin(profile, '5474', '1234');
-    await assert.rejects(auth.unlockProfile(accountId, kole, '5474'), status(401));
-    assert.ok(await auth.unlockProfile(accountId, kole, '1234'));
-    assert.ok(await auth.unlockProfile(accountId, alisha, '5474'), "Alisha's PIN is untouched");
+  test('the PIN can be changed for both profiles; the old one stops working and sessions are renewed', async () => {
+    const account = (await auth.getAccount())!;
+    await assert.rejects(auth.changePin(account, '0000', '1234', 'ip-d'), status(401));
+    await assert.rejects(auth.changePin(account, '5474', '12a4', 'ip-d'), status(400));
+    const updated = await auth.changePin(account, '5474', '1234', 'ip-d');
+    assert.equal(updated.session_version, account.session_version + 1);
+    await assert.rejects(auth.enterWithPin('5474', 'ip-e'), status(401));
+    assert.ok(await auth.enterWithPin('1234', 'ip-e'));
+    const profiles = await auth.listProfiles(accountId);
+    assert.ok(profiles.every((p) => p.pin_changed));
   });
 
   test('session tokens verify and reject tampering', async () => {
