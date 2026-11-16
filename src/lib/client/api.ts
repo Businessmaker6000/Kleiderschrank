@@ -63,6 +63,8 @@ export interface Me {
   categories: CustomCategory[];
   pinChanged: boolean;
   aiAvailable: boolean;
+  /** the server can redraw photos as shop-style product shots */
+  studioAvailable: boolean;
 }
 
 const fetcher = <T,>(path: string) => api<T>(path);

@@ -9,8 +9,23 @@ export interface PreparedImage {
   previewUrl: string;
   /** palette colour guessed on the device from the garment itself */
   color: string | null;
-  /** true when the background was removed and the image is a transparent cut-out */
+  /** true when the background is gone and the image is a transparent cut-out */
   cutout: boolean;
+  /** true when the image was redrawn by the image model as a shop-style product shot */
+  studio: boolean;
+  /** why a requested step was skipped (shown to the user) */
+  note: string | null;
+}
+
+export type Stage = "studio" | "cutout";
+
+export interface PrepareOptions {
+  /** let the image model redraw the garment as a product shot (needs the server feature) */
+  studio?: boolean;
+  /** cut the garment out of its background (default true) */
+  cutout?: boolean;
+  onStage?: (stage: Stage) => void;
+  onProgress?: (fraction: number) => void;
 }
 
 const MAX_SIDE = 1200;
@@ -49,6 +64,26 @@ function draw(source: CanvasImageSource, width: number, height: number, sx = 0, 
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, width, height);
   return canvas;
+}
+
+async function toCanvas(blob: Blob): Promise<HTMLCanvasElement> {
+  const img = await decode(blob);
+  try {
+    return draw(img.source, img.width, img.height);
+  } finally {
+    img.close();
+  }
+}
+
+function onWhite(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const flat = document.createElement("canvas");
+  flat.width = canvas.width;
+  flat.height = canvas.height;
+  const ctx = flat.getContext("2d")!;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, flat.width, flat.height);
+  ctx.drawImage(canvas, 0, 0);
+  return flat;
 }
 
 /** Bounding box of everything that is not transparent, plus the average colour of those pixels. */
@@ -131,16 +166,59 @@ async function removeBackground(input: Blob, onProgress?: (fraction: number) => 
   });
 }
 
-export interface PrepareOptions {
-  /** cut the garment out of its background (default true) */
-  cutout?: boolean;
-  onProgress?: (fraction: number) => void;
+type Finished = Pick<PreparedImage, "blob" | "width" | "height" | "previewUrl" | "color">;
+
+/** Crops a transparent image tightly around the garment and encodes it. Null when (almost) nothing is left. */
+async function finishCutout(full: HTMLCanvasElement): Promise<Finished | null> {
+  const { box, color, coverage } = analyseCutout(full);
+  if (!box || coverage < 0.02) return null;
+  const pad = Math.round(Math.max(box.w, box.h) * 0.03);
+  const x = Math.max(0, box.x - pad);
+  const y = Math.max(0, box.y - pad);
+  const w = Math.min(full.width - x, box.w + pad * 2);
+  const h = Math.min(full.height - y, box.h + pad * 2);
+  // stored images do not need more than this
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  const cropped = draw(full, Math.round(w * scale), Math.round(h * scale), x, y, w, h);
+  let blob = await toBlob(cropped, "image/webp", 0.9);
+  if (!blob || blob.type !== "image/webp") blob = await toBlob(cropped, "image/png");
+  if (!blob) return null;
+  return { blob, width: cropped.width, height: cropped.height, previewUrl: URL.createObjectURL(blob), color };
+}
+
+/** Asks the server's image model for a shop-style product shot of the photographed garment. */
+async function studioShot(base: HTMLCanvasElement, options: PrepareOptions): Promise<Finished> {
+  const photo = await toBlob(onWhite(base), "image/jpeg", 0.9);
+  if (!photo) throw new Error("Das Foto konnte nicht vorbereitet werden.");
+  const form = new FormData();
+  form.append("image", photo, "photo.jpg");
+  let res: Response;
+  try {
+    res = await fetch("/api/studio", { method: "POST", body: form, credentials: "same-origin" });
+  } catch {
+    throw new Error("Keine Verbindung zur Bild-KI.");
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Das Studiobild konnte nicht erzeugt werden.");
+  }
+  const generated = await res.blob();
+  let canvas = await toCanvas(generated);
+  // the model was asked for a transparent background; if it drew one anyway, cut it out here
+  if (analyseCutout(canvas).coverage > 0.97) {
+    options.onStage?.("cutout");
+    canvas = await toCanvas(await removeBackground(generated, options.onProgress));
+  }
+  const done = await finishCutout(canvas);
+  if (!done) throw new Error("Die Bild-KI hat ein leeres Bild geliefert.");
+  return done;
 }
 
 /**
- * Turns a raw photo into the image that is stored: scaled down, background removed,
- * cropped tightly around the garment. If the cut-out fails (old device, no network for the
- * model), the photo is kept as it is — the upload itself never depends on it.
+ * Turns a raw photo into the image that is stored.
+ *  1. optional: the image model redraws the garment as a clean product shot
+ *  2. otherwise: the garment is cut out of its background on the device
+ *  3. if neither works, the photo is kept as it is — an upload never depends on these steps
  */
 export async function prepareImage(file: Blob, options: PrepareOptions = {}): Promise<PreparedImage> {
   const img = await decode(file);
@@ -152,44 +230,35 @@ export async function prepareImage(file: Blob, options: PrepareOptions = {}): Pr
     img.close();
   }
 
-  if (options.cutout !== false) {
+  let note: string | null = null;
+
+  if (options.studio) {
+    options.onStage?.("studio");
     try {
-      const input = await toBlob(base, "image/png");
-      if (!input) throw new Error("encode failed");
-      const cut = await decode(await removeBackground(input, options.onProgress));
-      try {
-        const full = draw(cut.source, cut.width, cut.height);
-        const { box, color, coverage } = analyseCutout(full);
-        // an (almost) empty result means the model found no garment — keep the photo instead
-        if (box && coverage > 0.02) {
-          const pad = Math.round(Math.max(box.w, box.h) * 0.03);
-          const x = Math.max(0, box.x - pad);
-          const y = Math.max(0, box.y - pad);
-          const w = Math.min(full.width - x, box.w + pad * 2);
-          const h = Math.min(full.height - y, box.h + pad * 2);
-          const cropped = draw(full, w, h, x, y, w, h);
-          let blob = await toBlob(cropped, "image/webp", 0.9);
-          if (!blob || blob.type !== "image/webp") blob = await toBlob(cropped, "image/png");
-          if (blob) return { blob, width: w, height: h, previewUrl: URL.createObjectURL(blob), color, cutout: true };
-        }
-      } finally {
-        cut.close();
-      }
+      return { ...(await studioShot(base, options)), cutout: true, studio: true, note: null };
     } catch (e) {
-      console.warn("[cutout] background removal failed, keeping the photo", e);
+      note = `${(e as Error).message} Stattdessen wurde dein Foto freigestellt.`;
     }
   }
 
+  if (options.cutout !== false) {
+    options.onStage?.("cutout");
+    try {
+      const input = await toBlob(base, "image/png");
+      if (!input) throw new Error("encode failed");
+      const done = await finishCutout(await toCanvas(await removeBackground(input, options.onProgress)));
+      // an (almost) empty result means the model found no garment — keep the photo instead
+      if (done) return { ...done, cutout: true, studio: false, note };
+    } catch (e) {
+      console.warn("[cutout] background removal failed, keeping the photo", e);
+    }
+    note = "Der Hintergrund liess sich nicht entfernen – das Foto wird unverändert gespeichert.";
+  }
+
   // plain photo on a white base
-  const flat = document.createElement("canvas");
-  flat.width = base.width;
-  flat.height = base.height;
-  const ctx = flat.getContext("2d")!;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, flat.width, flat.height);
-  ctx.drawImage(base, 0, 0);
+  const flat = onWhite(base);
   let blob = await toBlob(flat, "image/webp", 0.86);
   if (!blob || blob.type !== "image/webp") blob = await toBlob(flat, "image/jpeg", 0.88);
   if (!blob) throw new Error("Das Bild konnte nicht verarbeitet werden.");
-  return { blob, width: flat.width, height: flat.height, previewUrl: URL.createObjectURL(blob), color: dominantColor(flat), cutout: false };
+  return { blob, width: flat.width, height: flat.height, previewUrl: URL.createObjectURL(blob), color: dominantColor(flat), cutout: false, studio: false, note };
 }

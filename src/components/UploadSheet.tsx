@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { mutate } from "swr";
 import { upload, useMe } from "@/lib/client/api";
 import { prepareImage } from "@/lib/client/image";
-import type { PreparedImage } from "@/lib/client/image";
+import type { PreparedImage, Stage } from "@/lib/client/image";
 import type { Item } from "@/lib/types";
 import { ItemForm, draftValid, emptyDraft } from "./ItemForm";
 import type { ItemDraft } from "./ItemForm";
@@ -18,6 +18,8 @@ interface Entry {
   error: string | null;
   /** progress of the background removal, 0…1 */
   progress: number;
+  /** what is being done to the photo right now */
+  stage: Stage;
   /** AI suggestion state for this photo */
   ai: "idle" | "running" | "done" | "none";
 }
@@ -62,18 +64,37 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
     const gen = generation.current;
     const base = entries.length;
     const list = Array.from(files).slice(0, 20);
-    setEntries((prev) => [...prev, ...list.map((file) => ({ file, image: null, draft: emptyDraft(), error: null, progress: 0, ai: "idle" as const }))]);
+    const studio = !!me?.studioAvailable;
+    setEntries((prev) => [
+      ...prev,
+      ...list.map((file) => ({ file, image: null, draft: emptyDraft(), error: null, progress: 0, stage: (studio ? "studio" : "cutout") as Stage, ai: "idle" as const })),
+    ]);
     // photos are prepared one after the other to keep memory low on phones
-    for (let k = 0; k < list.length; k++) {
-      try {
-        const image = await prepareImage(list[k], { onProgress: (p) => generation.current === gen && patch(base + k, { progress: p }) });
-        if (generation.current !== gen) return URL.revokeObjectURL(image.previewUrl);
-        patch(base + k, (e) => ({ image, draft: { ...e.draft, colors: e.draft.colors.length || !image.color ? e.draft.colors : [image.color] } }));
-      } catch (err) {
-        if (generation.current !== gen) return;
-        patch(base + k, { error: (err as Error).message });
-      }
+    for (let k = 0; k < list.length; k++) await prepare(base + k, list[k], studio, gen);
+  }
+
+  /** Runs the image pipeline for one photo: studio shot if requested, otherwise the cut-out. */
+  async function prepare(i: number, file: File, studio: boolean, gen: number) {
+    try {
+      const image = await prepareImage(file, {
+        studio,
+        onStage: (stage) => generation.current === gen && patch(i, { stage, progress: 0 }),
+        onProgress: (p) => generation.current === gen && patch(i, { progress: p }),
+      });
+      if (generation.current !== gen) return URL.revokeObjectURL(image.previewUrl);
+      patch(i, (e) => ({ image, draft: { ...e.draft, colors: e.draft.colors.length || !image.color ? e.draft.colors : [image.color] } }));
+    } catch (err) {
+      if (generation.current !== gen) return;
+      patch(i, { error: (err as Error).message });
     }
+  }
+
+  /** Switch the current photo between the generated studio shot and the plain cut-out. */
+  function redo(studio: boolean) {
+    if (!current?.image) return;
+    URL.revokeObjectURL(current.image.previewUrl);
+    patch(index, { image: null, progress: 0, stage: studio ? "studio" : "cutout" });
+    void prepare(index, current.file, studio, generation.current);
   }
 
   // optional AI tagging, one photo at a time, only for the photo that is being edited
@@ -181,7 +202,9 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
       {picking ? (
         <div className="space-y-3 pt-2">
           <p className="pb-2 text-sm leading-relaxed text-muted">
-            Der Hintergrund wird automatisch entfernt, übrig bleibt nur das Kleidungsstück. Am besten gelingt das, wenn es flach liegt oder am Bügel hängt und sich klar vom Hintergrund abhebt.
+            {me?.studioAvailable
+              ? "Aus deinem Foto entsteht automatisch ein sauberes Studiobild wie im Online-Shop. Fotografiere das ganze Teil gut sichtbar, am besten flach hingelegt oder am Bügel."
+              : "Der Hintergrund wird automatisch entfernt, übrig bleibt nur das Kleidungsstück. Am besten gelingt das, wenn es flach liegt oder am Bügel hängt und sich klar vom Hintergrund abhebt."}
           </p>
           <button
             type="button"
@@ -227,15 +250,23 @@ export function UploadSheet({ open, onClose }: { open: boolean; onClose: () => v
                 ) : (
                   <div className="skeleton flex size-full items-end justify-center rounded-xl p-3" role="status">
                     <span className="rounded-full bg-surface/90 px-3 py-1.5 text-center text-[11px] leading-tight text-ink">
-                      Hintergrund wird entfernt{current.progress > 0 ? ` … ${Math.round(current.progress * 100)} %` : " …"}
+                      {current.stage === "studio"
+                        ? "Studiobild wird erzeugt … das dauert bis zu 2 Minuten"
+                        : `Hintergrund wird entfernt${current.progress > 0 ? ` … ${Math.round(current.progress * 100)} %` : " …"}`}
                     </span>
                   </div>
                 )}
               </div>
-              {current.image && !current.image.cutout && (
-                <p className="mt-3 text-center text-xs leading-relaxed text-muted">
-                  Der Hintergrund liess sich nicht entfernen – das Foto wird unverändert gespeichert.
-                </p>
+              {current.image?.note && <p className="mt-3 text-center text-xs leading-relaxed text-muted">{current.image.note}</p>}
+              {current.image && me?.studioAvailable && progress === null && (
+                <div className="mt-3 text-center">
+                  {current.image.studio && (
+                    <p className="mb-2 text-xs leading-relaxed text-muted">Von der Bild-KI neu gezeichnet – bitte mit dem echten Teil vergleichen.</p>
+                  )}
+                  <button type="button" onClick={() => redo(!current.image!.studio)} className="text-xs text-ink underline underline-offset-4">
+                    {current.image.studio ? "Lieber mein Foto freigestellt verwenden" : "Studiobild erzeugen"}
+                  </button>
+                </div>
               )}
               {current.ai === "running" && (
                 <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted" role="status">

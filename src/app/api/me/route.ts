@@ -2,6 +2,7 @@ import { toPublic } from '@/lib/server/auth';
 import { route } from '@/lib/server/http';
 import { getPrefs, listCategories } from '@/lib/server/repo';
 import { requireProfile } from '@/lib/server/session';
+import { studioAvailable } from '@/lib/server/studio';
 
 export const GET = route(async () => {
   const { profile } = await requireProfile();
@@ -12,5 +13,6 @@ export const GET = route(async () => {
     categories,
     pinChanged: !!profile.pin_changed,
     aiAvailable: Boolean(process.env.ANTHROPIC_API_KEY),
+    studioAvailable: studioAvailable(),
   };
 });

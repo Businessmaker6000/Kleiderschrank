@@ -1,10 +1,10 @@
 "use client";
 
-import { Eraser, Heart, Sparkles, Trash2 } from "lucide-react";
+import { Eraser, Heart, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { mutate } from "swr";
-import { api, upload } from "@/lib/client/api";
+import { api, upload, useMe } from "@/lib/client/api";
 import { prepareImage } from "@/lib/client/image";
 import type { Item } from "@/lib/types";
 import { imageUrl } from "@/lib/types";
@@ -23,16 +23,20 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
   const [confirm, setConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [cutting, setCutting] = useState<number | null>(null);
+  const [studioBusy, setStudioBusy] = useState(false);
+  const { data: me } = useMe();
 
   // older uploads: remove the background now and replace the stored photo
-  async function cutOut() {
-    setCutting(0);
+  async function cutOut(studio = false) {
+    if (studio) setStudioBusy(true);
+    else setCutting(0);
     setError("");
     try {
       const res = await fetch(imageUrl(item)!, { credentials: "same-origin" });
       if (!res.ok) throw new Error("Das Foto konnte nicht geladen werden.");
-      const prepared = await prepareImage(await res.blob(), { onProgress: setCutting });
+      const prepared = await prepareImage(await res.blob(), { studio, onProgress: studio ? undefined : setCutting });
       URL.revokeObjectURL(prepared.previewUrl);
+      if (studio && !prepared.studio) throw new Error(prepared.note || "Das Studiobild konnte nicht erzeugt werden.");
       if (!prepared.cutout) throw new Error("Der Hintergrund liess sich bei diesem Foto nicht entfernen.");
       const form = new FormData();
       form.append("image", prepared.blob, "photo");
@@ -41,12 +45,13 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
       form.append("cutout", "1");
       await upload(`/api/items/${item.id}/image`, form, () => {});
       await mutate("/api/items");
-      toast("Hintergrund entfernt");
+      toast(studio ? "Studiobild gespeichert" : "Hintergrund entfernt");
       onClose();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setCutting(null);
+      setStudioBusy(false);
     }
   }
 
@@ -113,9 +118,15 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
                 {draft.favorite ? "Lieblingsstück" : "Als Favorit markieren"}
               </Button>
               {item.image && !item.image.cutout && (
-                <Button variant="outline" size="sm" onClick={cutOut} loading={cutting !== null}>
+                <Button variant="outline" size="sm" onClick={() => cutOut(false)} loading={cutting !== null} disabled={studioBusy}>
                   {cutting === null && <Eraser className="size-4" aria-hidden />}
                   {cutting === null ? "Hintergrund entfernen" : `Wird entfernt … ${Math.round(cutting * 100)} %`}
+                </Button>
+              )}
+              {item.image && me?.studioAvailable && (
+                <Button variant="outline" size="sm" onClick={() => cutOut(true)} loading={studioBusy} disabled={cutting !== null}>
+                  {!studioBusy && <Wand2 className="size-4" aria-hidden />}
+                  {studioBusy ? "Studiobild wird erzeugt …" : "Studiobild erzeugen"}
                 </Button>
               )}
               <Button variant="outline" size="sm" onClick={() => router.push(`/create?around=${item.id}`)}>

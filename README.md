@@ -49,6 +49,9 @@ Vorlage: [`.env.example`](.env.example). Lokal als `.env.local`, beim Hoster in 
 | `SESSION_SECRET` | Produktion | Zufallswert, mindestens 32 Zeichen, signiert die Session-Cookies |
 | `SETUP_CODE` | Produktion | Einmal-Code für die Ersteinrichtung, damit niemand Fremdes eine frisch veröffentlichte App übernimmt |
 | `ANTHROPIC_API_KEY` | optional | Aktiviert die automatische Erkennung von Kategorie, Farbe, Stil usw. beim Upload |
+| `OPENAI_API_KEY` | optional | Aktiviert Studiobilder: Die Bild-KI zeichnet jedes hochgeladene Foto als sauberes Produktbild neu (kostet pro Bild, Foto geht an OpenAI) |
+| `OPENAI_IMAGE_MODEL` | optional | Bild-Modell (Standard `gpt-image-2`) |
+| `OPENAI_IMAGE_QUALITY` | optional | `low`, `medium` (Standard) oder `high` |
 | `ANTHROPIC_MODEL` | optional | Anderes Claude-Modell für die Erkennung (Standard `claude-opus-5-5`) |
 | `DATA_DIR` | optional | Ordner des lokalen Treibers (Standard `.data`) |
 
