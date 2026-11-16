@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/* ---------- design tokens ----------
+   Neutral base (profile selection, login) plus one theme per profile.
+   Switching profile only swaps these variables — every component reads them. */
+:root {
+  --bg: #f7f5f1;
+  --surface: #fdfcfa;
+  --tile: #efece6;
+  --ink: #1c1b19;
+  --muted: #77726a;
+  --line: #e4dfd6;
+  --chip: #ece8e0;
+  --primary: #1c1b19;
+  --primary-ink: #f7f5f1;
+  --accent: #6b6558;
+  --danger: #a4372f;
+}
+
+/* Kole — black, anthracite, warm white, sand, taupe, olive */
+[data-theme="kole"] {
+  --bg: #f5f2ec;
+  --surface: #fbf9f5;
+  --tile: #ebe6dc;
+  --ink: #161513;
+  --muted: #6e6a61;
+  --line: #ddd6c9;
+  --chip: #e6dfd2;
+  --primary: #1a1917;
+  --primary-ink: #f5f2ec;
+  --accent: #5d6247;
+  --danger: #9c3a2e;
+}
+
+/* Alisha — cream, rosé beige, champagne, soft taupe, muted mauve */
+[data-theme="alisha"] {
+  --bg: #faf6f1;
+  --surface: #fffcf9;
+  --tile: #f3e9e3;
+  --ink: #3a3034;
+  --muted: #8b7c7d;
+  --line: #ebdfd8;
+  --chip: #f1e4de;
+  --primary: #6a5560;
+  --primary-ink: #fff9f5;
+  --accent: #9a7385;
+  --danger: #a8454a;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-tile: var(--tile);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-chip: var(--chip);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display), "Iowan Old Style", Georgia, serif;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  transition: background-color 0.4s ease, color 0.4s ease;
+  overscroll-behavior-y: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 16px inputs: prevents iOS from zooming the page on focus */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.skeleton {
+  background: linear-gradient(100deg, var(--tile) 40%, var(--surface) 50%, var(--tile) 60%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* the display serif defaults to old-style figures; temperatures and PIN keys need lining ones */
+.font-display {
+  font-variant-numeric: lining-nums;
+}
