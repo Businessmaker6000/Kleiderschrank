@@ -164,13 +164,35 @@ class SupabaseDb implements Db {
   }
 }
 
+/**
+ * Forgiving reading of SUPABASE_URL. Accepts the plain project URL, the same with a path
+ * (e.g. .../rest/v1/), a dashboard link, or a bare project ref — and falls back to the
+ * project ref stored inside the API key. Always returns https://<ref>.supabase.co.
+ */
+export function resolveSupabaseUrl(raw: string | undefined, key?: string): string | undefined {
+  const value = (raw || '').trim();
+  const origin = (ref: string) => `https://${ref.toLowerCase()}.supabase.co`;
+  const fromHost = value.match(/([a-z0-9]{15,30})\.supabase\.co/i);
+  if (fromHost) return origin(fromHost[1]);
+  const fromDashboard = value.match(/supabase\.com\/dashboard\/project\/([a-z0-9]{15,30})/i);
+  if (fromDashboard) return origin(fromDashboard[1]);
+  if (/^[a-z0-9]{15,30}$/i.test(value)) return origin(value);
+  // legacy keys are JWTs that carry the project ref
+  if (key && key.startsWith('eyJ')) {
+    try {
+      const ref = JSON.parse(Buffer.from(key.split('.')[1], 'base64url').toString()).ref;
+      if (typeof ref === 'string' && /^[a-z0-9]{15,30}$/.test(ref)) return origin(ref);
+    } catch {}
+  }
+  return value || undefined;
+}
+
 const g = globalThis as unknown as { __wardrobeDb?: Db };
 
 export function db(): Db {
   if (g.__wardrobeDb) return g.__wardrobeDb;
-  // trimmed: a stray space or line break from copy and paste must not break the connection
-  const url = process.env.SUPABASE_URL?.trim().replace(/\/+$/, '');
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const url = resolveSupabaseUrl(process.env.SUPABASE_URL, key);
   if (url && key) {
     g.__wardrobeDb = new SupabaseDb(url, key);
   } else {

@@ -1,6 +1,6 @@
 // Setup diagnostics. Tells which piece of the configuration is missing or failing, without
 // ever returning a secret. Once the app is set up and healthy it only answers { ok: true }.
-import { db } from '@/lib/server/db';
+import { db, resolveSupabaseUrl } from '@/lib/server/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,12 +9,10 @@ const TABLES = ['accounts', 'profiles', 'user_preferences', 'clothing_items', 'c
 
 const NIL = '00000000-0000-0000-0000-000000000000';
 
-function describeUrl(value: string | undefined): string {
-  if (!value) return 'fehlt';
-  const v = value.trim();
-  if (v !== value) return 'enthält Leerzeichen am Anfang oder Ende';
-  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co\/?$/.test(v)) return 'hat nicht die Form https://<projekt>.supabase.co';
-  return 'ok';
+function describeUrl(value: string | undefined, key: string | undefined): string {
+  const resolved = resolveSupabaseUrl(value, key?.trim());
+  if (!resolved || !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(resolved)) return value ? 'nicht als Supabase-Adresse erkennbar' : 'fehlt';
+  return value?.trim() === resolved ? 'ok' : 'ok (automatisch korrigiert)';
 }
 
 function describeKey(value: string | undefined): string {
@@ -36,7 +34,7 @@ function describeKey(value: string | undefined): string {
 
 export async function GET() {
   const env: Record<string, string> = {
-    SUPABASE_URL: describeUrl(process.env.SUPABASE_URL),
+    SUPABASE_URL: describeUrl(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY),
     SUPABASE_SERVICE_ROLE_KEY: describeKey(process.env.SUPABASE_SERVICE_ROLE_KEY),
     SESSION_SECRET: !process.env.SESSION_SECRET ? 'fehlt' : process.env.SESSION_SECRET.length < 32 ? 'zu kurz (mindestens 32 Zeichen)' : 'ok',
     SETUP_CODE: process.env.SETUP_CODE ? 'ok' : 'fehlt',

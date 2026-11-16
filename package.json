@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/core.test.ts",
+    "test": "node --test tests/core.test.ts tests/url.test.ts",
     "typecheck": "tsc --noEmit",
     "e2e": "node scripts/e2e.mjs"
   },
