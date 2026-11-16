@@ -187,6 +187,18 @@ export function resolveSupabaseUrl(raw: string | undefined, key?: string): strin
   return value || undefined;
 }
 
+/** True when SUPABASE_SERVICE_ROLE_KEY holds the public (anon / publishable) key, which cannot write. */
+export function hasPublicKeyInsteadOfSecret(): boolean {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || '';
+  if (key.startsWith('sb_publishable_')) return true;
+  if (!key.startsWith('eyJ')) return false;
+  try {
+    return JSON.parse(Buffer.from(key.split('.')[1], 'base64url').toString()).role !== 'service_role';
+  } catch {
+    return false;
+  }
+}
+
 const g = globalThis as unknown as { __wardrobeDb?: Db };
 
 export function db(): Db {
