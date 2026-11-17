@@ -246,7 +246,10 @@ export async function deleteItem(profileId: string, id: string): Promise<void> {
   await db().remove('outfit_items', { item_id: id, profile_id: profileId });
   await db().remove('clothing_images', { item_id: id, profile_id: profileId });
   await db().remove('clothing_items', { id, profile_id: profileId });
-  await db().removeFiles(images.map((i) => i.path));
+  // the piece is gone at this point; a leftover file is only wasted space, not an error for the user
+  await db()
+    .removeFiles(images.map((i) => i.path))
+    .catch((e) => console.warn('[items] could not remove image file:', (e as Error).message));
   // outfits that lost their last piece have nothing left to show
   for (const outfitId of new Set(affected.map((a) => a.outfit_id))) {
     const rest = await db().select('outfit_items', { outfit_id: outfitId, profile_id: profileId });

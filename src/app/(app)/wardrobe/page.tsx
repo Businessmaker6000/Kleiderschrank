@@ -1,6 +1,6 @@
 "use client";
 
-import { Heart, Plus, Search, Shirt, SlidersHorizontal, X } from "lucide-react";
+import { Check, Heart, Plus, Search, Shirt, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { mutate } from "swr";
 import { PageHeader } from "@/components/AppShell";
@@ -8,7 +8,7 @@ import { ItemImage } from "@/components/Collage";
 import { ItemEditor } from "@/components/ItemEditor";
 import { ColorDot } from "@/components/ItemForm";
 import { UploadSheet } from "@/components/UploadSheet";
-import { Button, Chip, ChipRow, EmptyState, Group, Sheet, Skeleton, cx, inputClass, useToast } from "@/components/ui";
+import { Button, Chip, ChipRow, ConfirmSheet, EmptyState, Group, Sheet, Skeleton, cx, inputClass, useToast } from "@/components/ui";
 import { api, useItems } from "@/lib/client/api";
 import { COLORS, GROUPS, GROUP_LABEL, SEASONS, STYLES } from "@/lib/taxonomy";
 import type { Group as GroupId } from "@/lib/taxonomy";
@@ -40,6 +40,36 @@ export default function WardrobePage() {
   const [seasons, setSeasons] = useState<string[]>([]);
   const [onlyFav, setOnlyFav] = useState(false);
   const [sort, setSort] = useState<Sort>("newest");
+  // selection mode: tick several pieces, then delete them in one go
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  function stopSelecting() {
+    setSelecting(false);
+    setSelected([]);
+  }
+
+  async function deleteSelected() {
+    setDeleting(true);
+    let done = 0;
+    let failure = "";
+    for (const id of selected) {
+      try {
+        await api(`/api/items/${id}`, { method: "DELETE" });
+        done++;
+      } catch (e) {
+        failure = (e as Error).message;
+      }
+    }
+    await Promise.all([mutate("/api/items"), mutate("/api/outfits")]);
+    setDeleting(false);
+    setConfirmDelete(false);
+    stopSelecting();
+    if (failure) toast(done ? `${done} gelöscht, bei den übrigen: ${failure}` : failure, "error");
+    else toast(done === 1 ? "Kleidungsstück gelöscht" : `${done} Kleidungsstücke gelöscht`);
+  }
 
   // filters combine: every active filter group must match (within a group, any value matches)
   const visible = useMemo(() => {
@@ -100,9 +130,22 @@ export default function WardrobePage() {
         eyebrow={items ? `${items.length} ${items.length === 1 ? "Teil" : "Teile"}` : "Kleiderschrank"}
         title="Wardrobe"
         action={
-          <Button size="sm" onClick={() => setUploadOpen(true)}>
-            <Plus className="size-4" aria-hidden /> Hinzufügen
-          </Button>
+          selecting ? (
+            <Button size="sm" variant="outline" onClick={stopSelecting}>
+              Fertig
+            </Button>
+          ) : (
+            <div className="flex gap-2">
+              {!!items?.length && (
+                <Button size="sm" variant="outline" onClick={() => setSelecting(true)}>
+                  Auswählen
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setUploadOpen(true)}>
+                <Plus className="size-4" aria-hidden /> Hinzufügen
+              </Button>
+            </div>
+          )
         }
       />
 
@@ -213,8 +256,19 @@ export default function WardrobePage() {
               <ul className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-3 md:gap-x-5 md:gap-y-7 lg:grid-cols-4">
                 {visible.map((item) => (
                   <li key={item.id} className="group relative">
-                    <button type="button" onClick={() => setEditing(item)} className="block w-full text-left">
-                      <div className="aspect-[3/4] overflow-hidden rounded-2xl bg-tile p-3 transition group-hover:shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => (selecting ? setSelected(toggle(selected, item.id)) : setEditing(item))}
+                      aria-pressed={selecting ? selected.includes(item.id) : undefined}
+                      aria-label={selecting ? `${item.name} ${selected.includes(item.id) ? "abwählen" : "auswählen"}` : undefined}
+                      className="block w-full text-left"
+                    >
+                      <div
+                        className={cx(
+                          "aspect-[3/4] overflow-hidden rounded-2xl bg-tile p-3 transition group-hover:shadow-md",
+                          selecting && selected.includes(item.id) && "ring-2 ring-ink ring-inset",
+                        )}
+                      >
                         <ItemImage item={item} className="size-full transition duration-300 group-hover:scale-[1.03]" />
                       </div>
                       <p className="mt-2.5 truncate text-sm">{item.name}</p>
@@ -223,8 +277,20 @@ export default function WardrobePage() {
                         {item.type}
                       </p>
                     </button>
+                    {selecting && (
+                      <span
+                        aria-hidden
+                        className={cx(
+                          "pointer-events-none absolute top-2.5 left-2.5 flex size-6 items-center justify-center rounded-full border transition",
+                          selected.includes(item.id) ? "border-primary bg-primary text-primary-ink" : "border-ink/30 bg-surface/80",
+                        )}
+                      >
+                        {selected.includes(item.id) && <Check className="size-3.5" strokeWidth={2.5} />}
+                      </span>
+                    )}
                     <button
                       type="button"
+                      hidden={selecting}
                       onClick={() => toggleFavorite(item)}
                       aria-pressed={item.favorite}
                       aria-label={item.favorite ? `${item.name} aus Favoriten entfernen` : `${item.name} als Favorit markieren`}
@@ -300,6 +366,31 @@ export default function WardrobePage() {
           </Group>
         </div>
       </Sheet>
+
+      {selecting && (
+        <div className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-30 px-5 pb-3 md:bottom-6">
+          <div className="mx-auto flex max-w-md items-center gap-3 rounded-full border border-line bg-surface py-2 pr-2 pl-5 shadow-xl">
+            <p className="flex-1 text-sm" role="status">
+              {selected.length === 0 ? "Teile antippen" : `${selected.length} ausgewählt`}
+            </p>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(selected.length === visible.length ? [] : visible.map((i) => i.id))}>
+              {selected.length === visible.length && visible.length > 0 ? "Keine" : "Alle"}
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => setConfirmDelete(true)} disabled={!selected.length}>
+              <Trash2 className="size-4" aria-hidden /> Löschen
+            </Button>
+          </div>
+        </div>
+      )}
+      <ConfirmSheet
+        open={confirmDelete}
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={deleteSelected}
+        loading={deleting}
+        title={selected.length === 1 ? "Kleidungsstück löschen?" : `${selected.length} Kleidungsstücke löschen?`}
+        text="Die ausgewählten Teile werden samt Foto dauerhaft gelöscht und aus allen gespeicherten Outfits entfernt. Das lässt sich nicht rückgängig machen."
+        confirmLabel="Löschen"
+      />
 
       <UploadSheet open={uploadOpen} onClose={() => setUploadOpen(false)} />
       {editing && <ItemEditor key={editing.id} item={editing} onClose={() => setEditing(null)} />}

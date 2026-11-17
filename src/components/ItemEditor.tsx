@@ -97,8 +97,8 @@ export function ItemEditor({ item, onClose }: { item: Item; onClose: () => void 
           <div className="space-y-3">
             <ErrorText>{error}</ErrorText>
             <div className="flex gap-3">
-              <Button variant="danger" onClick={() => setConfirm(true)} aria-label="Kleidungsstück löschen" className="w-12 px-0">
-                <Trash2 className="size-4" aria-hidden />
+              <Button variant="danger" onClick={() => setConfirm(true)} className="px-5">
+                <Trash2 className="size-4" aria-hidden /> Löschen
               </Button>
               <Button className="flex-1" onClick={save} loading={busy} disabled={!draftValid(draft)}>
                 Speichern
